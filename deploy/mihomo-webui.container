@@ -1,0 +1,98 @@
+# Quadlet unit для systemd (Ubuntu Server 24.04, podman 4.4+).
+#
+# Установка (system-wide, требует sudo):
+#   sudo cp web-ui/deploy/mihomo-webui.container /etc/containers/systemd/
+#   sudo cp web-ui/deploy/mihomo-webui.env.example /etc/mihomo-webui.env
+#   sudo $EDITOR /etc/mihomo-webui.env       # заполнить креды MikroTik
+#   sudo systemctl daemon-reload
+#   sudo systemctl start mihomo-webui.service
+#   # Note: `systemctl enable` does not work on Quadlet-generated units —
+#   # autostart on boot is configured via the [Install] section in this file
+#   # (read by the generator at daemon-reload time).
+#
+# Установка (rootless, от обычного пользователя):
+#   mkdir -p ~/.config/containers/systemd
+#   cp web-ui/deploy/mihomo-webui.container ~/.config/containers/systemd/
+#   cp web-ui/deploy/mihomo-webui.env.example ~/.config/mihomo-webui.env
+#   $EDITOR ~/.config/mihomo-webui.env
+#   # EnvironmentFile= ниже хардкодит /etc/mihomo-webui.env — для rootless
+#   # переписываем путь на $HOME/.config/mihomo-webui.env:
+#   sed -i 's|/etc/mihomo-webui.env|'"$HOME"'/.config/mihomo-webui.env|' \
+#       ~/.config/containers/systemd/mihomo-webui.container
+#   systemctl --user daemon-reload
+#   systemctl --user start mihomo-webui.service
+#   loginctl enable-linger "$USER"     # keep user systemd alive after logout
+#
+# Проверка:
+#   systemctl status mihomo-webui.service
+#   podman logs mihomo-webui
+#   curl -fsS http://localhost:8080/api/health
+#
+# Документация Quadlet: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+
+[Unit]
+Description=mihomo-proxy-ros web UI (group manager)
+Documentation=file:///etc/containers/systemd/mihomo-webui.container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Образ — собранный локально (`podman build`) либо опубликованный в реестр.
+# Для system-wide unit подходит short-name `localhost/mihomo-webui:latest`.
+# Для pull из реестра укажите полный путь, например:
+#   Image=ghcr.io/medium1992/mihomo-proxy-ros-webui:latest
+Image=localhost/mihomo-webui:latest
+
+ContainerName=mihomo-webui
+
+# Порт хоста : порт контейнера (Caddy слушает на 80 внутри).
+# По умолчанию веб-интерфейс доступен на http://<pi-host>:8080.
+PublishPort=8080:80
+
+# Все настройки (креды MikroTik, basic auth) — в env-файле.
+# Файл монтируется только на чтение systemd-ом, секреты не попадают в unit.
+EnvironmentFile=/etc/mihomo-webui.env
+
+# Авто-обновление образа из реестра (раскомментировать только если
+# Image= указывает на реестр, например ghcr.io/...).
+# Для локально собранного `localhost/mihomo-webui:latest` AutoUpdate=registry
+# приводит к шуму в журнале — реестра, из которого тянуть обновление, нет.
+# AutoUpdate=registry
+
+# Дополнительная защита: не давать контейнеру писать в свою файловую систему,
+# кроме явных томов. Caddy создаёт служебные файлы в XDG_DATA_HOME=/data
+# (instance UUID, lock-файлы) и читает XDG_CONFIG_HOME=/config даже при
+# `auto_https off / persist_config off`, поэтому без tmpfs на /data и /config
+# в логах появляются warn/error про read-only file system. supervisord и
+# uvicorn пишут только в /tmp и /run.
+ReadOnly=true
+Tmpfs=/tmp
+Tmpfs=/run
+Tmpfs=/data
+Tmpfs=/config
+
+# Без новых привилегий, drop всех capabilities кроме одной: Caddy биндится
+# на привилегированный порт (80 по умолчанию) внутри контейнера, и для этого
+# нужен CAP_NET_BIND_SERVICE. Если меняете WEBUI_PORT на >=1024, эту строку
+# можно удалить.
+NoNewPrivileges=true
+DropCapability=ALL
+AddCapability=CAP_NET_BIND_SERVICE
+
+[Service]
+# Restart=always — пусть systemd поднимает сервис при любых падениях.
+Restart=always
+RestartSec=10s
+TimeoutStartSec=120
+# При остановке backend дренирует запущенный workflow (см. app.py
+# `_shutdown`): worst-case = RUN_SCRIPT_TIMEOUT + WAIT_STOPPED_TIMEOUT +
+# WAIT_RUNNING_TIMEOUT + MIHOMO_READY_TIMEOUT + 30s headroom (~960s по
+# умолчанию). Если systemd пошлёт SIGKILL раньше, чем backend успеет
+# завершить запущенный `script_run`, финальный `script_remove` удалит
+# выполняющийся скрипт прямо во время работы — то самое поведение, ради
+# борьбы с которым и вводился drain. Берём 17 мин с запасом; при
+# увеличении RUN_SCRIPT_TIMEOUT нужно поднимать и это значение.
+TimeoutStopSec=1020
+
+[Install]
+WantedBy=multi-user.target default.target

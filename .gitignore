@@ -1,0 +1,11 @@
+# Override the user's global gitignore which excludes any "backend/" directory.
+!backend/
+!backend/**
+
+# Local Python noise we still want to keep out.
+backend/**/__pycache__/
+backend/**/*.pyc
+.pytest_cache/
+.venv/
+.coverage
+htmlcov/

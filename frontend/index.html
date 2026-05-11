@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>mihomo-proxy-ros · web UI</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <h1>mihomo-proxy-ros · group manager</h1>
+        <div class="health" id="health" data-state="unknown" title="MikroTik REST API">
+            <span class="dot"></span>
+            <span class="label">проверка…</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="card" id="current-section">
+            <div class="card-head">
+                <h2>Текущие группы</h2>
+                <button type="button" class="btn-ghost" id="reload-current" title="Обновить">↻</button>
+            </div>
+            <ul class="group-list" id="group-list"></ul>
+            <p class="empty" id="group-list-empty" hidden>Нет групп. Добавьте первую ниже.</p>
+            <details class="rule-envs">
+                <summary>Связанные ENV переменные</summary>
+                <ul id="rule-envs-list"></ul>
+                <p class="empty" id="rule-envs-empty" hidden>Нет переменных правил.</p>
+            </details>
+            <p class="error" id="current-error" hidden></p>
+        </section>
+
+        <section class="card" id="add-section">
+            <div class="card-head">
+                <h2>Добавить группу</h2>
+            </div>
+            <form id="add-form">
+                <label>
+                    <span>Тип правила</span>
+                    <select id="rule-kind">
+                        <option value="GEOSITE" selected>GEOSITE</option>
+                        <option value="GEOIP">GEOIP</option>
+                        <option value="DOMAIN">DOMAIN</option>
+                        <option value="SUFFIX">SUFFIX</option>
+                        <option value="KEYWORD">KEYWORD</option>
+                    </select>
+                </label>
+                <label id="category-label">
+                    <span>Категория из MetaCubeX/meta-rules-dat (используется как имя группы по умолчанию)</span>
+                    <select id="rule-category">
+                        <option value="">— загрузка… —</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Своё имя группы (опционально; если пусто — берётся выбранная категория)</span>
+                    <input type="text" id="custom-name" placeholder="например, my-group" autocomplete="off" pattern="[\-A-Za-z0-9_]+">
+                </label>
+                <label>
+                    <span>Значение правила (по умолчанию = имя группы или выбранная категория)</span>
+                    <input type="text" id="rule-value" placeholder="например, youtube или category-ai-!cn,openai" autocomplete="off" pattern="[\-A-Za-z0-9._,!@]+">
+                </label>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" id="add-submit">Добавить</button>
+                </div>
+            </form>
+            <p class="error" id="available-error" hidden></p>
+        </section>
+    </main>
+
+    <div class="modal-backdrop" id="progress-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="progress-title">
+            <div class="modal-head">
+                <h3 id="progress-title">Выполнение…</h3>
+                <span class="modal-status" id="progress-summary">в процессе…</span>
+            </div>
+            <ol class="step-list" id="step-list"></ol>
+            <div class="modal-actions">
+                <button type="button" class="btn-primary" id="progress-close" disabled>Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Caddyfile (no-auth variant).
+#
+# Listens on :{$WEBUI_PORT:80}, serves the static SPA from /srv/frontend
+# and reverse-proxies /api/* to the FastAPI backend.
+
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:{$WEBUI_PORT:80} {
+	@api path /api/*
+	handle @api {
+		# No `encode gzip` here — gzip buffers output and breaks the SSE
+		# streams emitted by /api/groups/{add,remove}. flush_interval -1
+		# would otherwise be defeated by the encoder.
+		reverse_proxy {$BACKEND_HOST:127.0.0.1}:{$BACKEND_PORT:8000} {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode gzip
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

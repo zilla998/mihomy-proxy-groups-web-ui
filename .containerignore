@@ -1,0 +1,43 @@
+# Files excluded from the podman build context (analogous to .dockerignore).
+# Keeps the image small and rebuilds fast.
+
+# VCS / editor noise
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+.DS_Store
+
+# Python caches and virtualenvs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.venv
+venv
+.tox
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Test scratch
+tests/__pycache__
+backend/tests/__pycache__
+**/.coverage*
+htmlcov
+
+# Build artifacts
+build
+dist
+out
+
+# Local dev / docs that don't need to ship
+README.md
+scripts/build.md
+docs
+
+# Container build itself
+Containerfile
+.containerignore

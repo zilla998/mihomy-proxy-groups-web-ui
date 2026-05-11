@@ -1,0 +1,34 @@
+# Caddyfile (basic-auth variant).
+#
+# Selected by start-caddy.sh when both WEBUI_USER and WEBUI_PASSWORD_HASH are
+# set. Generate the hash with:
+#     podman run --rm caddy:2-alpine caddy hash-password --plaintext '<pwd>'
+
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:{$WEBUI_PORT:80} {
+	basic_auth {
+		{$WEBUI_USER} {$WEBUI_PASSWORD_HASH}
+	}
+
+	@api path /api/*
+	handle @api {
+		# No `encode gzip` here — gzip buffers output and breaks the SSE
+		# streams emitted by /api/groups/{add,remove}. flush_interval -1
+		# would otherwise be defeated by the encoder.
+		reverse_proxy {$BACKEND_HOST:127.0.0.1}:{$BACKEND_PORT:8000} {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode gzip
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}
