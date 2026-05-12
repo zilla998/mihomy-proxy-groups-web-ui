@@ -9,3 +9,7 @@ backend/**/*.pyc
 .venv/
 .coverage
 htmlcov/
+
+# Local deployment secrets.
+deploy/mihomo-webui.env
+AGENTS.md

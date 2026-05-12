@@ -1,0 +1,27 @@
+services:
+  mihomo-webui:
+    container_name: mihomo-webui
+    image: localhost/mihomo-webui:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+    env_file:
+      - path: ./deploy/mihomo-webui.env
+        required: true
+        format: raw
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /data
+      - /config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    stop_grace_period: 1020s

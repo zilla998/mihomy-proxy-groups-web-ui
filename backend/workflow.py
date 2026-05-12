@@ -187,6 +187,28 @@ def _parse_geosite_list(text: str) -> list[str]:
     return out
 
 
+def _parse_inline_dns_fwd_domains(value: str) -> list[str]:
+    """Extract DNS-FWD-able domains from inline DOMAIN/SUFFIX env values.
+
+    ``entrypoint.sh`` accepts comma-separated values for rule envs. DNS-FWD can
+    only mirror positive domain-like entries, so negated ``!example.com``
+    tokens are ignored and duplicate hosts collapse on first sight.
+    """
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in value.split(","):
+        token = raw.strip()
+        if not token or token.startswith("!"):
+            continue
+        domain = token[2:] if token.startswith("+.") else token
+        if not domain or domain in seen:
+            continue
+        seen.add(domain)
+        out.append(domain)
+    return out
+
+
 def _rsc_escape(value: str) -> str:
     """Escape RouterOS double-quoted string metacharacters.
 
@@ -463,9 +485,14 @@ class AddGroupWorkflow(_BaseGroupWorkflow):
             "add_rule_env",
             f"Add {_rule_env_key(self.name, self.rule_kind)}={self.rule_value} env",
         )
+        dns_fwd_source = (
+            f"Fetch {self.rule_value}.list from meta-rules-dat"
+            if self.rule_kind == "GEOSITE"
+            else f"Build RouterOS DNS-FWD script from {self.rule_kind} value"
+        )
         self._add_step(
             "fetch_geosite_list",
-            f"Fetch {self.rule_value}.list from meta-rules-dat",
+            dns_fwd_source,
         )
         self._add_step("run_router_script", "Run RouterOS DNS-FWD script")
         self._add_step("stop_container", "Stop mihomo-proxy-ros container")
@@ -535,12 +562,17 @@ class AddGroupWorkflow(_BaseGroupWorkflow):
         return f"created {key}={self.rule_value}"
 
     async def _do_fetch_geosite_list(self) -> str:
-        # Only GEOSITE rules drive DNS-FWD generation: meta-rules-dat ships a
-        # ``geo/geosite/<name>.list`` of bare-host / ``+.X`` entries that map
-        # cleanly onto RouterOS ``/ip dns static add ... type=FWD ...`` rows.
-        # GEOIP and the inline DOMAIN/SUFFIX/KEYWORD kinds have no analogue
-        # there — skip the fetch + script-run pair for them and let the
-        # container restart pick the new env up.
+        # GEOSITE pulls domain entries from meta-rules-dat. Inline DOMAIN and
+        # SUFFIX values already are domain names, so they can be mirrored into
+        # RouterOS DNS-FWD directly. GEOIP/KEYWORD do not map to a single
+        # ``/ip dns static add ... type=FWD name=...`` row.
+        if self.rule_kind in {"DOMAIN", "SUFFIX"}:
+            domains = _parse_inline_dns_fwd_domains(self.rule_value)
+            if not domains:
+                self._rsc_text = None
+                return f"no DNS-FWD-able domains in {self.rule_kind} value, skipped"
+            self._rsc_text = _build_dns_fwd_rsc(domains, comment=self.name)
+            return f"{len(domains)} inline domains"
         if self.rule_kind != "GEOSITE":
             self._rsc_text = None
             return f"skipped (rule_kind={self.rule_kind})"

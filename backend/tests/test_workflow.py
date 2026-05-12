@@ -21,6 +21,7 @@ from backend.workflow import (
     WorkflowError,
     _build_dns_fwd_rsc,
     _parse_geosite_list,
+    _parse_inline_dns_fwd_domains,
 )
 
 
@@ -1026,18 +1027,57 @@ async def test_add_group_fetch_list_500_still_fails_workflow() -> None:
     m.stop_container.assert_not_called()
 
 
-@pytest.mark.parametrize("kind", ["DOMAIN", "SUFFIX", "KEYWORD", "GEOIP"])
-async def test_add_group_skips_fetch_for_non_geosite_kind(kind: str) -> None:
-    """Only ``rule_kind=GEOSITE`` triggers the meta-rules-dat fetch and the
-    DNS-FWD script run. Other kinds (DOMAIN/SUFFIX/KEYWORD/GEOIP) record the
-    env and cycle the container, but neither fetch nor script_add fires."""
+@pytest.mark.parametrize("kind", ["DOMAIN", "SUFFIX"])
+async def test_add_group_builds_dns_fwd_for_inline_domain_kinds(kind: str) -> None:
+    """Inline DOMAIN/SUFFIX values can be mirrored to RouterOS DNS-FWD entries
+    without fetching meta-rules-dat."""
 
     m = _mock_mikrotik()
     _wire_happy_path(m)
     g = _mock_github()
 
     wf = AddGroupWorkflow(
-        m, g, name="t", rule_kind=kind, rule_value="example.com",
+        m, g, name="t", rule_kind=kind, rule_value="clore.ai",
+        envs_list="L", container_comment="C",
+    )
+    events = await _collect(wf)
+    assert events[-1]["ok"] is True
+
+    fetch_step = next(
+        e for e in events
+        if e["type"] == "step"
+        and e["step"]["id"] == "fetch_geosite_list"
+        and e["step"]["status"] == "ok"
+    )
+    assert fetch_step["step"]["message"] == "1 inline domains"
+
+    g.fetch_geosite_list.assert_not_awaited()
+    m.script_add.assert_called_once()
+    submitted = m.script_add.call_args.args[1]
+    assert ':global ForwardTo "C"\n' in submitted
+    assert "/ip dns static" in submitted
+    assert (
+        'add address-list=$AddressList forward-to=$ForwardTo comment="t" '
+        'match-subdomain=yes type=FWD name="clore.ai"'
+    ) in submitted
+    m.script_run.assert_awaited_once_with("*99", timeout=600.0)
+    # Container still cycles so the new env takes effect.
+    m.stop_container.assert_awaited_once()
+    m.start_container.assert_awaited_once()
+    m.flush_dns_cache.assert_awaited_once()
+
+
+@pytest.mark.parametrize("kind", ["KEYWORD", "GEOIP"])
+async def test_add_group_skips_dns_fwd_for_non_domain_kinds(kind: str) -> None:
+    """KEYWORD/GEOIP record the env and cycle the container, but they do not
+    map cleanly onto a RouterOS DNS-FWD static entry."""
+
+    m = _mock_mikrotik()
+    _wire_happy_path(m)
+    g = _mock_github()
+
+    wf = AddGroupWorkflow(
+        m, g, name="t", rule_kind=kind, rule_value="example",
         envs_list="L", container_comment="C",
     )
     events = await _collect(wf)
@@ -1055,7 +1095,6 @@ async def test_add_group_skips_fetch_for_non_geosite_kind(kind: str) -> None:
     g.fetch_geosite_list.assert_not_awaited()
     m.script_add.assert_not_called()
     m.script_run.assert_not_called()
-    # Container still cycles so the new env takes effect.
     m.stop_container.assert_awaited_once()
     m.start_container.assert_awaited_once()
     m.flush_dns_cache.assert_awaited_once()
@@ -1446,6 +1485,12 @@ def test_parse_geosite_list_dedup_preserves_first_occurrence() -> None:
         "other.example",
         "third.example",
     ]
+
+
+def test_parse_inline_dns_fwd_domains_csv_skips_negated_and_dedups() -> None:
+    assert _parse_inline_dns_fwd_domains(
+        "clore.ai, +.example.com, !blocked.example, clore.ai, "
+    ) == ["clore.ai", "example.com"]
 
 
 def test_build_dns_fwd_rsc_empty_domains_returns_empty_string() -> None:
